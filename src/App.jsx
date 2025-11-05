@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { RefreshCw, Clock, Database, ChevronDown, ChevronUp, BookOpen, Calendar, Users, Play, Square, MapPin, CheckCircle, XCircle, ArrowLeft, LogOut, Lock, User } from 'lucide-react';
 import QRCode from 'qrcode';
 import { supabase } from './supabaseClient';
+import * as XLSX from 'xlsx';
 
 
 const AttendanceSystem = () => {
@@ -10,6 +11,17 @@ const [isAuthenticated, setIsAuthenticated] = useState(false);
 const [loginForm, setLoginForm] = useState({ email: '', password: '' });
 const [loginError, setLoginError] = useState('');
 const [currentTeacher, setCurrentTeacher] = useState(null);
+// ADD THESE NEW LINES BELOW:
+const [showRegister, setShowRegister] = useState(false);
+const [registerForm, setRegisterForm] = useState({
+  name: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+  department: ''
+});
+const [registerError, setRegisterError] = useState('');
+const [registerSuccess, setRegisterSuccess] = useState(false);
 
 // Existing states
 const [currentSessionId, setCurrentSessionId] = useState(null);
@@ -88,6 +100,78 @@ const handleLogout = () => {
   setSelectedSession(null);
   setSessions([]);
   setActiveTab('setup');
+};
+
+// ADD THIS ENTIRE NEW FUNCTION BELOW:
+// Registration handler
+const handleRegister = async (e) => {
+  e.preventDefault();
+  setRegisterError('');
+  setRegisterSuccess(false);
+  
+  // Validation
+  if (registerForm.password !== registerForm.confirmPassword) {
+    setRegisterError('Passwords do not match');
+    return;
+  }
+  
+  if (registerForm.password.length < 6) {
+    setRegisterError('Password must be at least 6 characters long');
+    return;
+  }
+  
+  try {
+    // Check if email already exists
+    const { data: existingTeacher, error: checkError } = await supabase
+      .from('teachers')
+      .select('email')
+      .eq('email', registerForm.email)
+      .single();
+    
+    if (existingTeacher) {
+      setRegisterError('Email already registered. Please login instead.');
+      return;
+    }
+    
+   // Insert new teacher
+const { data, error } = await supabase
+  .from('teachers')
+  .insert({
+    name: registerForm.name,
+    email: registerForm.email,
+    password: registerForm.password,
+    department: registerForm.department
+  })
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('Registration error:', error);
+      setRegisterError('Failed to register. Please try again.');
+      return;
+    }
+    
+    // Registration successful
+    setRegisterSuccess(true);
+    setRegisterForm({
+      name: '',
+      email: '',
+      password: '',
+      confirmPassword: '',
+      department: ''
+      
+    });
+    
+    // Auto-switch to login after 2 seconds
+    setTimeout(() => {
+      setShowRegister(false);
+      setRegisterSuccess(false);
+    }, 2000);
+    
+  } catch (error) {
+    console.error('Registration error:', error);
+    setRegisterError('An error occurred. Please try again.');
+  }
 };
 
 const generateQRCode = async (sessionId) => {
@@ -535,6 +619,39 @@ const loadFailedAttendance = async (sessionId) => {
   }
 };
 
+const exportToExcel = (session) => {
+  // Get unique students (remove duplicates by email)
+  const uniqueStudents = {};
+  
+  session.students?.forEach(student => {
+    if (!uniqueStudents[student.email]) {
+      uniqueStudents[student.email] = {
+        Name: student.name,
+        Email: student.email,
+        Status: 'Present',
+        'Marked At': student.timestamp,
+        'Distance (m)': student.distance
+      };
+    }
+  });
+  
+  // Convert to array
+  const attendanceData = Object.values(uniqueStudents);
+  
+  // Create worksheet
+  const ws = XLSX.utils.json_to_sheet(attendanceData);
+  
+  // Create workbook
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Attendance');
+  
+  // Generate filename
+  const filename = `Attendance_${session.subject}_${session.section}_${session.date}.xlsx`;
+  
+  // Download
+  XLSX.writeFile(wb, filename);
+};
+
 
 // Poll for new attendance records during active session
 useEffect(() => {
@@ -556,87 +673,213 @@ useEffect(() => {
 }, [sessionActive, currentSessionId]);
 
 
-  // Login Screen
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
-        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-          <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-8 text-white">
-            <div className="flex items-center justify-center mb-4">
-              <div className="bg-white bg-opacity-20 p-4 rounded-full">
-                <Lock size={48} />
-              </div>
+ // Login Screen
+if (!isAuthenticated) {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-8 text-white">
+          <div className="flex items-center justify-center mb-4">
+            <div className="bg-white bg-opacity-20 p-4 rounded-full">
+              <Lock size={48} />
             </div>
-            <h1 className="text-3xl font-bold text-center">Teacher Portal</h1>
-            <p className="text-center text-indigo-100 mt-2">Anti-Proxy Attendance System</p>
           </div>
-          
-          <div className="p-8">
-            <form onSubmit={handleLogin} className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <User className="inline mr-2" size={16} />
-                  Email
-                </label>
-                <input
-                  type="email"
-                  value={loginForm.email}
-                  onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
-                  placeholder="Enter your email"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  <Lock className="inline mr-2" size={16} />
-                  Password
-                </label>
-                <input
-                  type="password"
-                  value={loginForm.password}
-                  onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
-                  placeholder="Enter your password"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  required
-                />
-              </div>
-
-              {loginError && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
-                  {loginError}
+          <h1 className="text-3xl font-bold text-center">Teacher Portal</h1>
+          <p className="text-center text-indigo-100 mt-2">Anti-Proxy Attendance System</p>
+        </div>
+        
+        <div className="p-8">
+          {!showRegister ? (
+            // Login Form
+            <>
+              <form onSubmit={handleLogin} className="space-y-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <User className="inline mr-2" size={16} />
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={loginForm.email}
+                    onChange={(e) => setLoginForm({...loginForm, email: e.target.value})}
+                    placeholder="Enter your email"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
                 </div>
-              )}
 
-              <button
-                type="submit"
-                disabled={locationLoading}
-                className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {locationLoading ? (
-                  <>
-                    <RefreshCw size={20} className="animate-spin" />
-                    Signing in...
-                  </>
-                ) : (
-                  'Log In'
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Lock className="inline mr-2" size={16} />
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={loginForm.password}
+                    onChange={(e) => setLoginForm({...loginForm, password: e.target.value})}
+                    placeholder="Enter your password"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+
+                {loginError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                    {loginError}
+                  </div>
                 )}
-              </button>
-            </form>
 
-            <div className="mt-6 pt-6 border-t border-gray-200">
-              <p className="text-sm text-gray-600 text-center mb-3">Demo Credentials:</p>
-              <div className="bg-gray-50 rounded-lg p-3 text-sm">
-                <p className="text-gray-700"><strong>Email:</strong> demo@school.com</p>
-                <p className="text-gray-700"><strong>Password:</strong> demo</p>
+                <button
+                  type="submit"
+                  disabled={locationLoading}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                >
+                  {locationLoading ? (
+                    <>
+                      <RefreshCw size={20} className="animate-spin" />
+                      Signing in...
+                    </>
+                  ) : (
+                    'Log In'
+                  )}
+                </button>
+              </form>
+
+              <div className="mt-6 text-center">
+                <p className="text-gray-600 text-sm mb-3">Don't have an account?</p>
+                <button
+                  onClick={() => {
+                    setShowRegister(true);
+                    setLoginError('');
+                  }}
+                  className="text-indigo-600 hover:text-indigo-800 font-semibold text-sm flex items-center justify-center gap-2 mx-auto"
+                >
+                  <User size={16} />
+                  Register as Teacher
+                </button>
               </div>
-            </div>
-          </div>
+            </>
+          ) : (
+            // Registration Form
+            <>
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <User className="inline mr-2" size={16} />
+                    Full Name
+                  </label>
+                  <input
+                    type="text"
+                    value={registerForm.name}
+                    onChange={(e) => setRegisterForm({...registerForm, name: e.target.value})}
+                    placeholder="Enter your full name"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={registerForm.email}
+                    onChange={(e) => setRegisterForm({...registerForm, email: e.target.value})}
+                    placeholder="Enter your email"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Department
+                  </label>
+                  <input
+                    type="text"
+                    value={registerForm.department}
+                    onChange={(e) => setRegisterForm({...registerForm, department: e.target.value})}
+                    placeholder="e.g., Computer Science"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+
+               
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <Lock className="inline mr-2" size={16} />
+                    Password
+                  </label>
+                  <input
+                    type="password"
+                    value={registerForm.password}
+                    onChange={(e) => setRegisterForm({...registerForm, password: e.target.value})}
+                    placeholder="Create a password (min 6 characters)"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                    minLength={6}
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Confirm Password
+                  </label>
+                  <input
+                    type="password"
+                    value={registerForm.confirmPassword}
+                    onChange={(e) => setRegisterForm({...registerForm, confirmPassword: e.target.value})}
+                    placeholder="Re-enter your password"
+                    className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    required
+                  />
+                </div>
+
+                {registerError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+                    {registerError}
+                  </div>
+                )}
+
+                {registerSuccess && (
+                  <div className="bg-green-50 border border-green-200 text-green-700 px-4 py-3 rounded-lg text-sm">
+                    Registration successful! Redirecting to login...
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={registerSuccess}
+                  className="w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-3 px-6 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 transition shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Register
+                </button>
+              </form>
+
+              <div className="mt-6 text-center">
+                <p className="text-gray-600 text-sm mb-3">Already have an account?</p>
+                <button
+                  onClick={() => {
+                    setShowRegister(false);
+                    setRegisterError('');
+                    setRegisterSuccess(false);
+                  }}
+                  className="text-indigo-600 hover:text-indigo-800 font-semibold text-sm flex items-center justify-center gap-2 mx-auto"
+                >
+                  <ArrowLeft size={16} />
+                  Back to Login
+                </button>
+              </div>
+            </>
+          )}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
+}
 
   // Main Application (after login)
   return (
@@ -1076,19 +1319,28 @@ useEffect(() => {
                 </div>
                 
                 <div className="grid md:grid-cols-3 gap-4 mb-6">
-                  <div className="bg-indigo-50 rounded-lg p-4">
-                    <p className="text-sm text-indigo-600 mb-1">Total Students</p>
-                    <p className="text-3xl font-bold text-indigo-900">{selectedSession.students?.length || 0}</p>
-                  </div>
-                  <div className="bg-blue-50 rounded-lg p-4">
-                    <p className="text-sm text-blue-600 mb-1">QR Codes Generated</p>
-                    <p className="text-3xl font-bold text-blue-900">{selectedSession.qrCount}</p>
-                  </div>
-                  <div className="bg-green-50 rounded-lg p-4">
-                    <p className="text-sm text-green-600 mb-1">Duration</p>
-                    <p className="text-xl font-bold text-green-900">{selectedSession.startTime} - {selectedSession.endTime}</p>
-                  </div>
-                </div>
+  <div className="bg-indigo-50 rounded-lg p-4">
+    <p className="text-sm text-indigo-600 mb-1">Total Students</p>
+    <p className="text-3xl font-bold text-indigo-900">{selectedSession.students?.length || 0}</p>
+  </div>
+  <div className="bg-blue-50 rounded-lg p-4">
+    <p className="text-sm text-blue-600 mb-1">QR Codes Generated</p>
+    <p className="text-3xl font-bold text-blue-900">{selectedSession.qrCount}</p>
+  </div>
+  <div className="bg-green-50 rounded-lg p-4">
+    <p className="text-sm text-green-600 mb-1">Duration</p>
+    <p className="text-xl font-bold text-green-900">{selectedSession.startTime} - {selectedSession.endTime}</p>
+  </div>
+</div>
+
+<button
+  onClick={() => exportToExcel(selectedSession)}
+  disabled={!selectedSession.students || selectedSession.students.length === 0}
+  className="w-full bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition disabled:bg-gray-300 disabled:cursor-not-allowed flex items-center justify-center gap-2 mb-6"
+>
+  <Database size={20} />
+  Export Attendance to Excel
+</button>
                 
                 {selectedSession.teacherLocation && (
                   <div className="bg-gray-50 rounded-lg p-4 mb-6">
